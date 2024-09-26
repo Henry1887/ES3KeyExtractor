@@ -18,7 +18,7 @@ On what unity Games will this game work on?
 
 Usage:
 (For PC Unity Games)
-search.exe {game_Data Folder)
+search.exe {game_Data Folder}
 
 (For Android Unity Games)
 search.exe {apk file of the game}
