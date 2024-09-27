@@ -19,6 +19,9 @@ Many developers using EasySave3 utilize the built-in encryption function to prev
 ## Supported Games
 This tool works on **every Unity game** (PC and Android), as long as you have access to the unencrypted assets of the game.
 
+## How does this Tool work
+If provided with the data folder of the game, it will go through every file in it and look for "ES3Defaults", then check if a variable amount of bytes afterwards is "SaveFile.es3" and then read the first printable characters after that, which is the key, until it hits non printable characters.
+
 ## Usage
 
 For **PC Unity Games**:
