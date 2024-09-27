@@ -3,13 +3,20 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <ctype.h>
 
 #define BUFFER_SIZE 4096
 
 const char *target_string = "ES3Defaults";
 const char *target_filename = "SaveFile.es3";
 
-int search_in_buffer(unsigned char *buffer, size_t bytes_read, size_t *string_start) {
+// Function to check if a byte is printable
+int is_printable(unsigned char byte) {
+    return (byte >= 32 && byte <= 126);
+}
+
+// Function to search for the original string pattern in a given buffer
+int search_in_buffer(const unsigned char *buffer, size_t bytes_read, size_t *string_start) {
     for (size_t i = 0; i <= bytes_read - strlen(target_string); i++) {
         if (memcmp(&buffer[i], target_string, strlen(target_string)) == 0) {
             size_t after_seq1 = i + strlen(target_string) + 9;
@@ -23,6 +30,33 @@ int search_in_buffer(unsigned char *buffer, size_t bytes_read, size_t *string_st
     return 0;
 }
 
+// Function to search for the alternative pattern in a given buffer
+int search_in_buffer_alternative(const unsigned char *buffer, size_t bytes_read, size_t *string_start) {
+    for (size_t i = 0; i <= bytes_read - strlen(target_string); i++) {
+        if (memcmp(&buffer[i], target_string, strlen(target_string)) == 0) {
+            size_t after_seq1 = i + strlen(target_string) + 3;
+            if (after_seq1 + strlen(target_filename) < bytes_read &&
+                memcmp(&buffer[after_seq1], target_filename, strlen(target_filename)) == 0) {
+                *string_start = after_seq1 + strlen(target_filename) + 5;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// Function to read a printable key from the buffer
+void read_key_from_buffer(const unsigned char *buffer, size_t string_start, size_t bytes_read) {
+    size_t print_end = string_start;
+    while (print_end < bytes_read && buffer[print_end] != 0x00) {
+        if (!is_printable(buffer[print_end])) break;
+        print_end++;
+    }
+    fwrite(&buffer[string_start], 1, print_end - string_start, stdout);
+    printf("\n");
+}
+
+// Function to search in a single file
 int search_in_file(const char *filename) {
     FILE *file = fopen(filename, "rb");
     if (!file) {
@@ -35,13 +69,26 @@ int search_in_file(const char *filename) {
 
     while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
         size_t string_start;
+        
+        // Try the original search first
         if (search_in_buffer(buffer, bytes_read, &string_start)) {
             printf("Found key: ");
-            size_t print_end = string_start;
-            while (print_end < bytes_read && buffer[print_end] != 0x00) print_end++;
-            fwrite(&buffer[string_start], 1, print_end - string_start, stdout);
-            printf("\n");
+            read_key_from_buffer(buffer, string_start, bytes_read);
 
+            // Check if the extracted key is "password"
+            if (strncmp((char *)&buffer[string_start], "password", 8) == 0) {
+                printf("The game may have extra logic to alter the default key, or 'password' is the actual key used by the devs.\n");
+            }
+            fclose(file);
+            return 1;
+        }
+
+        // If original search fails, try the alternative pattern
+        if (search_in_buffer_alternative(buffer, bytes_read, &string_start)) {
+            printf("Found key (alternative): ");
+            read_key_from_buffer(buffer, string_start, bytes_read);
+
+            // Check if the extracted key is "password"
             if (strncmp((char *)&buffer[string_start], "password", 8) == 0) {
                 printf("The game may have extra logic to alter the default key, or 'password' is the actual key used by the devs.\n");
             }
@@ -53,6 +100,7 @@ int search_in_file(const char *filename) {
     return 0;
 }
 
+// Function to search through a directory
 void search_directory(const char *directory) {
     struct dirent *entry;
     DIR *dp = opendir(directory);
