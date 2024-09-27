@@ -6,6 +6,7 @@
 #include <ctype.h>
 
 #define BUFFER_SIZE 4096
+#define MAX_SKIP 64
 
 const char *target_string = "ES3Defaults";
 const char *target_filename = "SaveFile.es3";
@@ -15,30 +16,29 @@ int is_printable(unsigned char byte) {
     return (byte >= 32 && byte <= 126);
 }
 
-// Function to search for the original string pattern in a given buffer
-int search_in_buffer(const unsigned char *buffer, size_t bytes_read, size_t *string_start) {
+// Function to search for the key using a flexible pattern
+int search_in_buffer_flexible(const unsigned char *buffer, size_t bytes_read, size_t *string_start) {
     for (size_t i = 0; i <= bytes_read - strlen(target_string); i++) {
         if (memcmp(&buffer[i], target_string, strlen(target_string)) == 0) {
-            size_t after_seq1 = i + strlen(target_string) + 9;
-            if (after_seq1 + strlen(target_filename) < bytes_read &&
-                memcmp(&buffer[after_seq1], target_filename, strlen(target_filename)) == 0) {
-                *string_start = after_seq1 + strlen(target_filename) + 12;
-                return 1;
+            // Skip bytes until we find a printable character
+            size_t j;
+            for (j = i + strlen(target_string); j < i + strlen(target_string) + MAX_SKIP && j < bytes_read; j++) {
+                if (is_printable(buffer[j])) {
+                    break;  // Found a printable character
+                }
             }
-        }
-    }
-    return 0;
-}
 
-// Function to search for the alternative pattern in a given buffer
-int search_in_buffer_alternative(const unsigned char *buffer, size_t bytes_read, size_t *string_start) {
-    for (size_t i = 0; i <= bytes_read - strlen(target_string); i++) {
-        if (memcmp(&buffer[i], target_string, strlen(target_string)) == 0) {
-            size_t after_seq1 = i + strlen(target_string) + 3;
-            if (after_seq1 + strlen(target_filename) < bytes_read &&
-                memcmp(&buffer[after_seq1], target_filename, strlen(target_filename)) == 0) {
-                *string_start = after_seq1 + strlen(target_filename) + 5;
-                return 1;
+            // Check for "SaveFile.es3"
+            if (j + strlen(target_filename) < bytes_read &&
+                memcmp(&buffer[j], target_filename, strlen(target_filename)) == 0) {
+                // Skip bytes until we find another printable character
+                j += strlen(target_filename);
+                for (; j < i + strlen(target_string) + MAX_SKIP && j < bytes_read; j++) {
+                    if (is_printable(buffer[j])) {
+                        *string_start = j;  // Set to the first printable character
+                        return 1;
+                    }
+                }
             }
         }
     }
@@ -49,7 +49,7 @@ int search_in_buffer_alternative(const unsigned char *buffer, size_t bytes_read,
 void read_key_from_buffer(const unsigned char *buffer, size_t string_start, size_t bytes_read) {
     size_t print_end = string_start;
     while (print_end < bytes_read && buffer[print_end] != 0x00) {
-        if (!is_printable(buffer[print_end])) break;
+        if (!is_printable(buffer[print_end])) break;  // Stop if non-printable
         print_end++;
     }
     fwrite(&buffer[string_start], 1, print_end - string_start, stdout);
@@ -60,7 +60,7 @@ void read_key_from_buffer(const unsigned char *buffer, size_t string_start, size
 int search_in_file(const char *filename) {
     FILE *file = fopen(filename, "rb");
     if (!file) {
-        printf("Could not open file: %s\n", filename);
+        fprintf(stderr, "Error: Could not open file: %s\n", filename);
         return 0;
     }
 
@@ -70,8 +70,8 @@ int search_in_file(const char *filename) {
     while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
         size_t string_start;
         
-        // Try the original search first
-        if (search_in_buffer(buffer, bytes_read, &string_start)) {
+        // Try the flexible search pattern
+        if (search_in_buffer_flexible(buffer, bytes_read, &string_start)) {
             printf("Found key: ");
             read_key_from_buffer(buffer, string_start, bytes_read);
 
@@ -82,20 +82,12 @@ int search_in_file(const char *filename) {
             fclose(file);
             return 1;
         }
-
-        // If original search fails, try the alternative pattern
-        if (search_in_buffer_alternative(buffer, bytes_read, &string_start)) {
-            printf("Found key (alternative): ");
-            read_key_from_buffer(buffer, string_start, bytes_read);
-
-            // Check if the extracted key is "password"
-            if (strncmp((char *)&buffer[string_start], "password", 8) == 0) {
-                printf("The game may have extra logic to alter the default key, or 'password' is the actual key used by the devs.\n");
-            }
-            fclose(file);
-            return 1;
-        }
     }
+
+    if (ferror(file)) {
+        fprintf(stderr, "Error: An error occurred while reading the file: %s\n", filename);
+    }
+
     fclose(file);
     return 0;
 }
@@ -105,7 +97,7 @@ void search_directory(const char *directory) {
     struct dirent *entry;
     DIR *dp = opendir(directory);
     if (!dp) {
-        printf("Could not open directory: %s\n", directory);
+        fprintf(stderr, "Error: Could not open directory: %s\n", directory);
         return;
     }
 
@@ -125,12 +117,15 @@ void search_directory(const char *directory) {
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("Usage: %s <file_or_folder>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <file_or_folder>\n", argv[0]);
         return 1;
     }
 
     struct stat path_stat;
-    stat(argv[1], &path_stat);
+    if (stat(argv[1], &path_stat) == -1) {
+        fprintf(stderr, "Error: Invalid path: %s\n", argv[1]);
+        return 1;
+    }
 
     if (S_ISDIR(path_stat.st_mode)) {
         search_directory(argv[1]);
@@ -139,7 +134,7 @@ int main(int argc, char *argv[]) {
             printf("Key not found. It might be stored elsewhere or encrypted.\n");
         }
     } else {
-        printf("Invalid path: %s\n", argv[1]);
+        fprintf(stderr, "Error: Invalid path: %s\n", argv[1]);
     }
 
     return 0;
