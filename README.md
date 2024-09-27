@@ -21,6 +21,7 @@ This tool works on **every Unity game** (PC and Android), as long as you have ac
 
 ## How does this Tool work
 If provided with the data folder of the game, it will go through every file in it and look for "ES3Defaults", then check if a variable amount of bytes afterwards is "SaveFile.es3" and then read the first printable characters after that, which is the key, until it hits non printable characters.
+If provided with an apk file it will just straight up search for that pattern in the apk file itself.
 
 ## Usage
 
